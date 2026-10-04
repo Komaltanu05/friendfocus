@@ -24,26 +24,30 @@ export default function App() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Accept': 'application/json',
         },
         body: JSON.stringify({ situation: situationText }),
       });
 
-      const contentType = response.headers.get('content-type') || '';
+      const responseText = await response.text();
 
-      if (!contentType.includes('application/json')) {
-        const text = await response.text();
-        if (text.trim().startsWith('<')) {
+      let data: any;
+      try {
+        data = JSON.parse(responseText);
+      } catch {
+        if (response.status === 504 || response.status === 502) {
+          throw new Error('Study plan generation timed out on Netlify. Please try again with a slightly shorter topic description.');
+        }
+        if (responseText.trim().startsWith('<')) {
           throw new Error(
             'The Netlify Function returned HTML instead of JSON. Please verify that GEMINI_API_KEY is configured in Netlify Site Configuration > Environment Variables.'
           );
         }
-        throw new Error(text || 'Received non-JSON response from server.');
+        throw new Error(responseText || `Received invalid response from server (status ${response.status}).`);
       }
 
-      const data = await response.json();
-
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to generate your study plan.');
+        throw new Error(data?.error || `Failed to generate your study plan (status ${response.status}).`);
       }
 
       setPlan(data);

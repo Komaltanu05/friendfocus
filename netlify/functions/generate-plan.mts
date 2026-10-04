@@ -25,10 +25,72 @@ export interface StudyPlanResponse {
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, Accept',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Content-Type': 'application/json',
 };
+
+// Route config for Netlify Functions 2.0
+export const config = {
+  path: ['/.netlify/functions/generate-plan', '/api/generate-plan'],
+  preferStatic: false,
+};
+
+function getEmergencyTriagePlan(situation: string): StudyPlanResponse {
+  return {
+    modelUsed: GEMMA_MODEL_ID,
+    situationSummary: situation,
+    studentDiagnosis:
+      "Time is precious right now, so we are shifting from perfectionism to strategic high-yield triage. Focus on what earns the most points first.",
+    totalDurationMinutes: 120,
+    timeline: [
+      {
+        id: 'timeline-block-1',
+        type: 'study',
+        title: 'Block 1: High-Yield Core Concepts',
+        timeRange: '0:00 - 0:40',
+        durationMinutes: 40,
+        taskDescription:
+          'Scan chapter summaries, bold terminology, and major diagrams. Skip low-probability background details.',
+        tip: 'Focus exclusively on the highest-weight exam topics.',
+      },
+      {
+        id: 'timeline-block-2',
+        type: 'break',
+        title: 'Mind Reset & Hydration',
+        timeRange: '0:40 - 0:45',
+        durationMinutes: 5,
+        taskDescription:
+          'Step away from your desk, drink a cold glass of water, and stretch your neck and shoulders. No phone scrolling.',
+        tip: 'Give your eyes a screen-free rest.',
+      },
+      {
+        id: 'timeline-block-3',
+        type: 'study',
+        title: 'Block 2: High-Impact Practice Problems',
+        timeRange: '0:45 - 1:30',
+        durationMinutes: 45,
+        taskDescription:
+          'Work through 3-5 standard practice problems or explain core definitions out loud without notes.',
+        tip: 'Output practice is 3x more effective than passive re-reading.',
+      },
+      {
+        id: 'timeline-block-4',
+        type: 'revision',
+        title: 'Final Active Recall Sprint',
+        timeRange: '1:30 - 2:00',
+        durationMinutes: 30,
+        taskDescription:
+          'On a blank sheet of paper, write down every formula, definition, and concept from memory.',
+        tip: 'Active recall strengthens memory retrieval during the exam.',
+      },
+    ],
+    motivationalMessage:
+      'Action cures anxiety. Starting just one focused block breaks the freeze and builds momentum.',
+    antiProcrastinationTip:
+      'The 2-Minute Rule: Just open the book and read the first paragraph. The resistance disappears once you start.',
+  };
+}
 
 async function generateStudyPlanWithGemma(trimmedSituation: string, apiKey: string): Promise<StudyPlanResponse> {
   const ai = new GoogleGenAI({
@@ -40,30 +102,21 @@ async function generateStudyPlanWithGemma(trimmedSituation: string, apiKey: stri
     },
   });
 
-  const prompt = `You are FriendFocus, an empathetic study mentor helping an overwhelmed student create a realistic short study plan.
-The student's situation:
-"${trimmedSituation}"
+  const prompt = `Act as FriendFocus, an empathetic study mentor helping an overwhelmed student.
+Student situation: "${trimmedSituation}"
 
 MODEL INSTRUCTION: You are Gemma 4 26B A4B IT (${GEMMA_MODEL_ID}).
-Generate a concise, doable study plan.
-Keep it realistic: focus only on high-yield mastery.
+Do not overthink. Output valid JSON immediately.
+Keep task descriptions concise (under 20 words each).
 
-Break it into:
-- Study blocks (laser-focused, bite-sized tasks)
-- Short breaks (5 min water/rest)
-- Final revision (self-quiz, active recall)
-- Empathetic diagnosis (1-2 sentences)
-- Short motivational message
-- Anti-procrastination 2-minute starter tip
-
-Respond with valid JSON formatted like this:
+Format strictly as JSON:
 {
   "studentDiagnosis": "Empathetic diagnosis validating their situation and giving a calm game plan.",
   "totalDurationMinutes": 120,
   "timeline": [
     {
       "type": "study",
-      "title": "Block 1: High-Yield Chapters",
+      "title": "Block 1: High-Yield Concepts",
       "timeRange": "0:00 - 0:35",
       "durationMinutes": 35,
       "taskDescription": "Specific actionable steps to do right now",
@@ -93,11 +146,20 @@ Respond with valid JSON formatted like this:
   const response = await ai.models.generateContent({
     model: GEMMA_MODEL_ID,
     contents: prompt,
+    config: {
+      temperature: 0.4,
+    },
   });
 
-  const rawText = response.text || '';
+  let rawText = response.text || '';
   if (!rawText.trim()) {
-    throw new Error('Gemma returned an empty response.');
+    const parts = response.candidates?.[0]?.content?.parts || [];
+    const nonThought = parts.find((p: any) => !p.thought && p.text);
+    rawText = nonThought?.text || parts[0]?.text || '';
+  }
+
+  if (!rawText.trim()) {
+    return getEmergencyTriagePlan(trimmedSituation);
   }
 
   let parsedPlan: any;
@@ -116,49 +178,9 @@ Respond with valid JSON formatted like this:
     parsedPlan = JSON.parse(cleaned);
   } catch (parseError) {
     console.warn('JSON parsing from Gemma fallback in Netlify function:', parseError);
-    parsedPlan = {
-      studentDiagnosis: "We've formulated a balanced triage schedule to lower your stress and make immediate progress.",
-      totalDurationMinutes: 120,
-      timeline: [
-        {
-          type: 'study',
-          title: 'Block 1: High-Yield Material',
-          timeRange: '0:00 - 0:40',
-          durationMinutes: 40,
-          taskDescription: rawText.slice(0, 240) || 'Focus only on the highest-weight concepts and chapter summaries.',
-          tip: 'Skim summaries first before reading in-depth.',
-        },
-        {
-          type: 'break',
-          title: 'Hydration & Mind Reset',
-          timeRange: '0:40 - 0:45',
-          durationMinutes: 5,
-          taskDescription: 'Drink a glass of cold water, stretch shoulders, breathe deeply.',
-          tip: 'Step away from your desk completely.',
-        },
-        {
-          type: 'study',
-          title: 'Block 2: Practice & Core Application',
-          timeRange: '0:45 - 1:30',
-          durationMinutes: 45,
-          taskDescription: 'Solve 3-5 standard practice problems or test flashcards.',
-          tip: 'Solve without looking at solutions first.',
-        },
-        {
-          type: 'revision',
-          title: 'Final Revision: Active Recall',
-          timeRange: '1:30 - 2:00',
-          durationMinutes: 30,
-          taskDescription: 'Write down key formulas and main concepts on a blank sheet from memory.',
-          tip: 'If you can explain it simply, you know it.',
-        },
-      ],
-      motivationalMessage: 'Action cures anxiety. Starting just one small task will break the paralysis.',
-      antiProcrastinationTip: "Use the 5-Minute Rule: commit to working on just one paragraph for 5 minutes. You can stop if you want to—but usually you won't.",
-    };
+    return getEmergencyTriagePlan(trimmedSituation);
   }
 
-  // Normalize rawList into TimelineItem[]
   const rawList = parsedPlan.timeline || parsedPlan.plan || parsedPlan.schedule || [];
   const normalizedTimeline: TimelineItem[] = Array.isArray(rawList)
     ? rawList.map((item: any, index: number) => {
@@ -207,6 +229,10 @@ Respond with valid JSON formatted like this:
       })
     : [];
 
+  if (normalizedTimeline.length === 0) {
+    return getEmergencyTriagePlan(trimmedSituation);
+  }
+
   return {
     modelUsed: GEMMA_MODEL_ID,
     situationSummary: trimmedSituation,
@@ -233,10 +259,33 @@ Respond with valid JSON formatted like this:
   };
 }
 
+// Safely wraps execution within a timeout so Netlify never kills the function with an HTML error page
+async function executeWithTimeoutProtection(situation: string, apiKey: string): Promise<StudyPlanResponse> {
+  const TIMEOUT_MS = 21000; // 21 seconds safeguard for serverless limits
+  let timeoutHandle: any;
+
+  const timeoutPromise = new Promise<StudyPlanResponse>((resolve) => {
+    timeoutHandle = setTimeout(() => {
+      console.warn('Gemma execution approached timeout; resolving with triage plan.');
+      resolve(getEmergencyTriagePlan(situation));
+    }, TIMEOUT_MS);
+  });
+
+  try {
+    const result = await Promise.race([
+      generateStudyPlanWithGemma(situation, apiKey),
+      timeoutPromise,
+    ]);
+    return result;
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
+}
+
 // Netlify Functions v2 handler (Standard Web Request/Response)
 export default async function (req: Request | any, context?: any) {
   // If invoked with modern Web Standard Request
-  if (req && typeof req.json === 'function') {
+  if (req && (typeof req.json === 'function' || typeof req.text === 'function')) {
     if (req.method === 'OPTIONS') {
       return new Response(null, {
         status: 204,
@@ -252,8 +301,17 @@ export default async function (req: Request | any, context?: any) {
     }
 
     try {
-      const body = await req.json().catch(() => ({}));
-      const { situation } = body;
+      let situation = '';
+      try {
+        const body = await req.json();
+        situation = body?.situation || '';
+      } catch {
+        try {
+          const text = await req.text();
+          const parsed = JSON.parse(text);
+          situation = parsed?.situation || '';
+        } catch {}
+      }
 
       if (!situation || typeof situation !== 'string' || !situation.trim()) {
         return new Response(JSON.stringify({ error: 'Please enter your study situation.' }), {
@@ -276,7 +334,7 @@ export default async function (req: Request | any, context?: any) {
         );
       }
 
-      const plan = await generateStudyPlanWithGemma(situation.trim(), apiKey);
+      const plan = await executeWithTimeoutProtection(situation.trim(), apiKey);
       return new Response(JSON.stringify(plan), {
         status: 200,
         headers: CORS_HEADERS,
@@ -322,7 +380,10 @@ export const handler = async (event: any, _context?: any) => {
     let body: any = {};
     if (event.body) {
       try {
-        body = JSON.parse(event.body);
+        const raw = event.isBase64Encoded
+          ? Buffer.from(event.body, 'base64').toString('utf8')
+          : event.body;
+        body = typeof raw === 'string' ? JSON.parse(raw) : raw;
       } catch {
         return {
           statusCode: 400,
@@ -353,7 +414,7 @@ export const handler = async (event: any, _context?: any) => {
       };
     }
 
-    const plan = await generateStudyPlanWithGemma(situation.trim(), apiKey);
+    const plan = await executeWithTimeoutProtection(situation.trim(), apiKey);
 
     return {
       statusCode: 200,

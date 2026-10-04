@@ -6,6 +6,9 @@
   directory = "netlify/functions"
   node_bundler = "esbuild"
 
+[functions."generate-plan"]
+  timeout = 26
+
 # Proxy /api/ requests to Netlify Functions
 [[redirects]]
   from = "/api/*"
