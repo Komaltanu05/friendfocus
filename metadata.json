@@ -1,0 +1,6 @@
+{
+  "name": "FriendFocus",
+  "description": "FriendFocus helps students overcome overwhelm and procrastination with realistic short study plans powered by Gemma 4 26B A4B IT.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
