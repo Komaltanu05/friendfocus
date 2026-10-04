@@ -19,8 +19,8 @@ export default function App() {
     setError(null);
 
     try {
-      // Call Netlify Function endpoint directly (with /api/ fallback)
-      let response = await fetch('/.netlify/functions/generate-plan', {
+      // Call the Netlify Function endpoint directly
+      const response = await fetch('/.netlify/functions/generate-plan', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -28,15 +28,16 @@ export default function App() {
         body: JSON.stringify({ situation: situationText }),
       });
 
-      // Graceful fallback to /api/generate-plan if 404
-      if (!response.ok && response.status === 404) {
-        response = await fetch('/api/generate-plan', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ situation: situationText }),
-        });
+      const contentType = response.headers.get('content-type') || '';
+
+      if (!contentType.includes('application/json')) {
+        const text = await response.text();
+        if (text.trim().startsWith('<')) {
+          throw new Error(
+            'The Netlify Function returned HTML instead of JSON. Please verify that GEMINI_API_KEY is configured in Netlify Site Configuration > Environment Variables.'
+          );
+        }
+        throw new Error(text || 'Received non-JSON response from server.');
       }
 
       const data = await response.json();
