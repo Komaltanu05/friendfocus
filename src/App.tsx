@@ -19,13 +19,25 @@ export default function App() {
     setError(null);
 
     try {
-      const response = await fetch('/api/generate-plan', {
+      // Call Netlify Function endpoint directly (with /api/ fallback)
+      let response = await fetch('/.netlify/functions/generate-plan', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ situation: situationText }),
       });
+
+      // Graceful fallback to /api/generate-plan if 404
+      if (!response.ok && response.status === 404) {
+        response = await fetch('/api/generate-plan', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ situation: situationText }),
+        });
+      }
 
       const data = await response.json();
 

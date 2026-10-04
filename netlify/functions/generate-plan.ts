@@ -1,18 +1,5 @@
-import express from 'express';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import dotenv from 'dotenv';
+import type { Handler, HandlerEvent } from '@netlify/functions';
 import { GoogleGenAI } from '@google/genai';
-
-dotenv.config();
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const app = express();
-const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
-
-app.use(express.json());
 
 // Gemma 4 26B A4B IT Model ID strictly as requested
 const GEMMA_MODEL_ID = 'gemma-4-26b-a4b-it';
@@ -37,32 +24,66 @@ export interface StudyPlanResponse {
   antiProcrastinationTip: string;
 }
 
-// Health / Info endpoint
-app.get(['/api/model-info', '/.netlify/functions/model-info'], (_req, res) => {
-  res.json({
-    appName: 'FriendFocus',
-    aiModel: 'Gemma 4 26B A4B IT',
-    modelId: GEMMA_MODEL_ID,
-    description: 'Specialized realistic study plan generator powered by Gemma open weights model.',
-  });
-});
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Content-Type': 'application/json',
+};
 
-// Primary Endpoint: Generate Study Plan with Gemma (supports Netlify Function path and Express path)
-app.post(['/api/generate-plan', '/.netlify/functions/generate-plan'], async (req, res) => {
+export const handler: Handler = async (event: HandlerEvent) => {
+  // Handle CORS preflight
+  if (event.httpMethod === 'OPTIONS') {
+    return {
+      statusCode: 204,
+      headers: CORS_HEADERS,
+      body: '',
+    };
+  }
+
+  if (event.httpMethod !== 'POST') {
+    return {
+      statusCode: 405,
+      headers: CORS_HEADERS,
+      body: JSON.stringify({ error: 'Method Not Allowed. Use POST.' }),
+    };
+  }
+
   try {
-    const { situation } = req.body;
+    let body: any = {};
+    if (event.body) {
+      try {
+        body = JSON.parse(event.body);
+      } catch {
+        return {
+          statusCode: 400,
+          headers: CORS_HEADERS,
+          body: JSON.stringify({ error: 'Invalid JSON request body.' }),
+        };
+      }
+    }
 
+    const { situation } = body;
     if (!situation || typeof situation !== 'string' || !situation.trim()) {
-      return res.status(400).json({ error: 'Please enter your study situation.' });
+      return {
+        statusCode: 400,
+        headers: CORS_HEADERS,
+        body: JSON.stringify({ error: 'Please enter your study situation.' }),
+      };
     }
 
     const trimmedSituation = situation.trim();
     const apiKey = process.env.GEMINI_API_KEY;
 
     if (!apiKey) {
-      return res.status(500).json({
-        error: 'Server configuration error: GEMINI_API_KEY is not set. Please provide the key in environment variables or Settings > Secrets.',
-      });
+      return {
+        statusCode: 500,
+        headers: CORS_HEADERS,
+        body: JSON.stringify({
+          error:
+            'Server configuration error: GEMINI_API_KEY is not set. Please configure GEMINI_API_KEY in your Netlify site environment variables.',
+        }),
+      };
     }
 
     const ai = new GoogleGenAI({
@@ -130,13 +151,11 @@ Respond with valid JSON formatted like this:
     });
 
     const rawText = response.text || '';
-
     if (!rawText.trim()) {
       throw new Error('Gemma returned an empty response.');
     }
 
     let parsedPlan: any;
-
     try {
       let cleaned = rawText.trim();
       const fenceMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
@@ -151,7 +170,7 @@ Respond with valid JSON formatted like this:
       }
       parsedPlan = JSON.parse(cleaned);
     } catch (parseError) {
-      console.warn('JSON parsing from Gemma fallback:', parseError);
+      console.warn('JSON parsing from Gemma fallback in Netlify function:', parseError);
       parsedPlan = {
         studentDiagnosis: "We've formulated a balanced triage schedule to lower your stress and make immediate progress.",
         totalDurationMinutes: 120,
@@ -190,7 +209,7 @@ Respond with valid JSON formatted like this:
           },
         ],
         motivationalMessage: 'Action cures anxiety. Starting just one small task will break the paralysis.',
-        antiProcrastinationTip: 'Use the 5-Minute Rule: commit to working on just one paragraph for 5 minutes. You can stop if you want to—but usually you won\'t.',
+        antiProcrastinationTip: "Use the 5-Minute Rule: commit to working on just one paragraph for 5 minutes. You can stop if you want to—but usually you won't.",
       };
     }
 
@@ -232,7 +251,12 @@ Respond with valid JSON formatted like this:
             title: item.title || item.focus || item.name || `Phase ${index + 1}`,
             timeRange: item.timeRange || (typeof item.time === 'string' ? item.time : `${durationMinutes}m`),
             durationMinutes,
-            taskDescription: item.taskDescription || item.activity || item.description || item.focus || 'Focus on active study steps.',
+            taskDescription:
+              item.taskDescription ||
+              item.activity ||
+              item.description ||
+              item.focus ||
+              'Focus on active study steps.',
             tip: item.tip || item.tips || undefined,
           };
         })
@@ -255,44 +279,31 @@ Respond with valid JSON formatted like this:
         parsedPlan.motivationalMessage ||
         parsedPlan.motivation ||
         parsedPlan.quote ||
-        "Action cures anxiety. Starting one small task breaks the freeze.",
+        'Action cures anxiety. Starting one small task breaks the freeze.',
       antiProcrastinationTip:
         parsedPlan.antiProcrastinationTip ||
         parsedPlan.hack ||
         parsedPlan.tip ||
-        "The 2-Minute Rule: Just open the book and read one sentence.",
+        'The 2-Minute Rule: Just open the book and read one sentence.',
     };
 
-    return res.json(finalPlan);
+    return {
+      statusCode: 200,
+      headers: CORS_HEADERS,
+      body: JSON.stringify(finalPlan),
+    };
   } catch (error: any) {
-    console.error('Error generating plan with Gemma:', error);
+    console.error('Error generating plan in Netlify function:', error);
     const errorMessage = error?.message || 'Failed to generate study plan with Gemma.';
-    return res.status(500).json({
-      error: errorMessage,
-      modelUsed: GEMMA_MODEL_ID,
-    });
+    return {
+      statusCode: 500,
+      headers: CORS_HEADERS,
+      body: JSON.stringify({
+        error: errorMessage,
+        modelUsed: GEMMA_MODEL_ID,
+      }),
+    };
   }
-});
+};
 
-// Static / Dev Server mounting
-async function startServer() {
-  if (process.env.NODE_ENV === 'production') {
-    app.use(express.static(path.resolve(__dirname, 'dist')));
-    app.get('*', (_req, res) => {
-      res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
-    });
-  } else {
-    const { createServer: createViteServer } = await import('vite');
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-  }
-
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`FriendFocus server running at http://0.0.0.0:${PORT} (Model: ${GEMMA_MODEL_ID})`);
-  });
-}
-
-startServer();
+export default handler;
