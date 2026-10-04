@@ -6,19 +6,14 @@
   directory = "netlify/functions"
   node_bundler = "esbuild"
 
-# Explicit pass-through for Netlify Functions
-[[redirects]]
-  from = "/.netlify/functions/*"
-  to = "/.netlify/functions/:splat"
-  status = 200
-
-# Alias /api/ calls to Netlify functions
+# Proxy /api/ requests to Netlify Functions
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/:splat"
   status = 200
 
-# SPA fallback for client-side routing
+# Client-side routing fallback (SPA history API)
+# Netlify Functions (/.netlify/functions/*) and static assets are served directly before this rule
 [[redirects]]
   from = "/*"
   to = "/index.html"
